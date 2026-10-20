@@ -72,7 +72,7 @@ object NewtonExtrapolacion {
  */
 object OptimizacionSueno {
     private const val K = 0.35
-    private fun capacidad(s: Double) = 100.0 * (1 - exp(-K * s))
+    fun capacidad(s: Double) = 100.0 * (1 - exp(-K * s))
     private fun derivada(s: Double) = 100.0 * K * exp(-K * s)
 
     fun newtonRaphson(f: (Double) -> Double, df: (Double) -> Double,

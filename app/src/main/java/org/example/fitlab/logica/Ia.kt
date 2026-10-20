@@ -23,7 +23,7 @@ class RedNeuronal(
             maxOf(0.0, b1[j] + x.indices.sumOf { i -> w1[j][i] * x[i] })
         }
         val z = DoubleArray(b2.size) { k -> b2[k] + oculta.indices.sumOf { j -> w2[k][j] * oculta[j] } }
-        val zMax = z.max()
+        val zMax = z.maxOrNull() ?: 0.0
         val e = z.map { exp(it - zMax) }          // restar el máximo evita desbordes
         val prob = DoubleArray(e.size) { e[it] / e.sum() }
         return EstadoAtleta.values()[prob.indices.maxByOrNull { prob[it] }!!] to prob
@@ -70,7 +70,7 @@ class RecomendadorBFS(
         var mejor = raiz
         var expansiones = 0
         while (cola.isNotEmpty() && expansiones < maxExpansiones) {   // la cota evita explorar sin fin
-            val actual = cola.poll()
+            val actual = cola.poll() ?: break
             expansiones++
             if (actual.u > mejor.u) mejor = actual
             val acciones = listOf(
