@@ -1,10 +1,15 @@
 package org.example.fitlab
 
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import org.example.fitlab.logica.*
+import java.util.Locale
 
 private const val SIN_DATOS = "Captura al menos 3 semanas en el Módulo 1 (o carga los datos de ejemplo)."
+
+private fun corto(x: Double) =
+    if (x == Math.rint(x)) String.format(Locale.US, "%.0f", x) else String.format(Locale.US, "%.1f", x)
 
 // ───────────────────────── MÓDULO 1 · CAPTURA ─────────────────────────
 class Modulo1Activity : PantallaBase() {
@@ -15,6 +20,18 @@ class Modulo1Activity : PantallaBase() {
         lateinit var lista: TextView
         lateinit var mensaje: TextView
         lateinit var campos: List<EditText>
+        lateinit var filas: List<FilaRango>
+        lateinit var selVar: Spinner
+        lateinit var grafica: GraficaLinea
+
+        fun dibujarGrafica() {
+            val idx = selVar.selectedItemPosition
+            if (idx >= 0) {
+                val v = Variable.values()[idx]
+                val (xs, ys) = Repositorio.historial.serie(v)
+                grafica.datos(xs, ys, banda = Referencias.paraVariable(v)?.let { it.min to it.max })
+            }
+        }
 
         fun refrescar() {
             val todos = Repositorio.historial.todos()
@@ -24,6 +41,21 @@ class Modulo1Activity : PantallaBase() {
                             "carga ${it.carga.toInt()} · VO2 ${f(it.vo2Max, 1)}"
                 }
             campos[0].setText(((todos.lastOrNull()?.semana ?: 0) + 1).toString())
+
+            val u = Repositorio.historial.ultimo()
+            if (u == null) {
+                listOf("FC en reposo", "FC sobre tu base", "Sueño", "Carga", "Proteínas")
+                    .forEachIndexed { i, t -> filas[i].vaciar(t) }
+            } else {
+                val delta = Repositorio.deltaFc()
+                val prot = u.proteinasG / u.pesoKg
+                filas[0].set("FC en reposo", u.fcReposo, "${u.fcReposo.toInt()} lpm", Referencias.FC_REPOSO, 30.0, 90.0)
+                filas[1].set("FC sobre tu base", delta, "${if (delta >= 0) "+" else ""}${f(delta, 1)} lpm", Referencias.DELTA_FC, -10.0, 15.0)
+                filas[2].set("Sueño", u.suenoHoras, "${f(u.suenoHoras, 1)} h", Referencias.SUENO, 0.0, 12.0)
+                filas[3].set("Carga", u.carga, "${u.carga.toInt()}", Referencias.CARGA, 0.0, 100.0)
+                filas[4].set("Proteínas", prot, "${f(prot, 1)} g/kg", Referencias.PROTEINA, 0.5, 3.0)
+            }
+            dibujarGrafica()
         }
 
         val sig = (Repositorio.historial.ultimo()?.semana ?: 0) + 1
@@ -61,7 +93,18 @@ class Modulo1Activity : PantallaBase() {
                 Repositorio.limpiar(); mensaje.text = ""; refrescar()
             }
         }
+        tarjeta("¿Cómo va el atleta?") {
+            nota("Última semana frente a los valores de referencia para atletas.")
+            filas = List(5) { filaRango() }
+            nota("Referencias generales y orientativas; no sustituyen a un entrenador o médico.")
+        }
+        tarjeta("Evolución") {
+            selVar = selector(Variable.values().map { it.etiqueta })
+            grafica = grafica(200)
+        }
         tarjeta("Historial") { lista = resultado() }
+
+        alElegir(selVar) { dibujarGrafica() }
         refrescar()
     }
 }
@@ -88,27 +131,35 @@ class Modulo2Activity : PantallaBase() {
         }
 
         calcular = {
-            val v = Variable.values()[selector.selectedItemPosition]
-            try {
-                val t = MinimosCuadrados.analizar(Repositorio.historial, v)
-                val (xs, ys) = Repositorio.historial.serie(v)
-                val s = numero(semana) ?: (xs.last() + 1)
-                val futuros = if (s > xs.last()) listOf(s to t.predecir(s)) else emptyList()
-                grafica.datos(xs, ys, recta = t.pendiente to t.ordenada, futuros = futuros)
-                val colorR2 = if (t.r2 >= 0.8) Tema.ACENTO else if (t.r2 >= 0.5) Tema.AMBAR else Tema.ROJO
-                m[0].set(f(t.pendiente, 3)); m[1].set(f(t.r2, 2), colorR2); m[2].set(t.clase)
-                val confianza = when {
-                    t.r2 >= 0.8 -> "alta: la recta describe bien los datos"
-                    t.r2 >= 0.5 -> "moderada"
-                    else -> "baja: los datos no siguen una línea clara"
+            val idx = selector.selectedItemPosition
+            if (idx >= 0) {
+                val v = Variable.values()[idx]
+                try {
+                    val t = MinimosCuadrados.analizar(Repositorio.historial, v)
+                    val (xs, ys) = Repositorio.historial.serie(v)
+                    val s = numero(semana) ?: (xs.last() + 1.0)
+                    val futuros = if (s > xs.last()) listOf(s to t.predecir(s)) else emptyList()
+                    val rango = Referencias.paraVariable(v)
+                    grafica.datos(xs, ys, recta = t.pendiente to t.ordenada, futuros = futuros,
+                        banda = rango?.let { it.min to it.max })
+                    val colorR2 = if (t.r2 >= 0.8) Tema.ACENTO else if (t.r2 >= 0.5) Tema.AMBAR else Tema.ROJO
+                    m[0].set(f(t.pendiente, 3)); m[1].set(f(t.r2, 2), colorR2); m[2].set(t.clase)
+                    val confianza = when {
+                        t.r2 >= 0.8 -> "alta: la recta describe bien los datos"
+                        t.r2 >= 0.5 -> "moderada"
+                        else -> "baja: los datos no siguen una línea clara"
+                    }
+                    var txt = "Recta: y = ${f(t.pendiente, 3)}·x + ${f(t.ordenada, 2)}\n" +
+                            "Confianza de la tendencia: $confianza\n" +
+                            "Predicción semana ${s.toInt()}: ${f(t.predecir(s), 2)}"
+                    Referencias.valoracionTendencia(v, t.clase)?.let { txt += "\n\n$it" }
+                    rango?.let { txt += "\nRango ideal: ${corto(it.min)}–${corto(it.max)} ${it.unidad}".trimEnd() }
+                    texto.text = txt
+                } catch (e: Exception) {
+                    grafica.datos(emptyList(), emptyList())
+                    m.forEach { it.set("—") }
+                    texto.text = SIN_DATOS
                 }
-                texto.text = "Recta: y = ${f(t.pendiente, 3)}·x + ${f(t.ordenada, 2)}\n" +
-                        "Confianza de la tendencia: $confianza\n" +
-                        "Predicción semana ${s.toInt()}: ${f(t.predecir(s), 2)}"
-            } catch (e: IllegalArgumentException) {
-                grafica.datos(emptyList(), emptyList())
-                m.forEach { it.set("—") }
-                texto.text = SIN_DATOS
             }
         }
         alElegir(selector) { calcular() }
@@ -138,26 +189,45 @@ class Modulo3Activity : PantallaBase() {
         }
 
         calcular = {
-            val v = vars[variable.selectedItemPosition]
-            val n = pasos.selectedItemPosition + 1
-            try {
-                val (xs, ys) = Repositorio.historial.serie(v)
-                val ultimaSemana = xs.last()
-                val futuros = (1..n).map { k ->
-                    (ultimaSemana + k) to NewtonExtrapolacion.predecir(Repositorio.historial, v, k)
+            val idxV = variable.selectedItemPosition
+            val idxP = pasos.selectedItemPosition
+            if (idxV >= 0 && idxP >= 0) {
+                val v = vars[idxV]
+                val n = idxP + 1
+                try {
+                    val (xs, ys) = Repositorio.historial.serie(v)
+                    if (xs.size < 3) throw IllegalArgumentException("Datos insuficientes")
+                    
+                    val futuros = (1..n).map { k ->
+                        (xs.last() + k) to NewtonExtrapolacion.predecir(Repositorio.historial, v, k)
+                    }
+                    val rango = Referencias.paraVariable(v)
+                    grafica.datos(xs, ys, futuros = futuros, banda = rango?.let { it.min to it.max })
+
+                    val pred = futuros.last().second
+                    val cambio = pred - ys.last()
+                    m[0].set(f(ys.last(), 1)); m[1].set(f(pred, 1), Tema.ACENTO2)
+                    m[2].set((if (cambio >= 0) "+" else "") + f(cambio, 1))
+
+                    val interpretacion = when (v) {
+                        Variable.FC_REPOSO -> {
+                            val r = rango ?: Rango(40.0, 60.0, "lpm")
+                            val dentro = r.contiene(pred)
+                            "Se espera una FC en reposo de ${f(pred, 0)} lpm: " +
+                                    (if (dentro) "dentro" else "fuera") + " del rango ideal (${corto(r.min)}–${corto(r.max)}).\n" +
+                                    (if (cambio > 1) "Si sube, puede indicar fatiga acumulada." else "")
+                        }
+                        else -> if (cambio >= 0) "Se espera que tu VO2 máx se mantenga o mejore."
+                        else "Se espera una baja del VO2 máx; revisa tu carga y tu descanso."
+                    }
+                    val tabla = NewtonExtrapolacion.tablaDiferencias(ys.takeLast(4))
+                    texto.text = interpretacion.trim() + "\n\nTabla de diferencias (últimos 4 valores):\n" +
+                            tabla.mapIndexed { k, fila -> "Δ$k: " + fila.joinToString("   ") { f(it, 2) } }.joinToString("\n")
+                } catch (e: Exception) {
+                    grafica.datos(emptyList(), emptyList())
+                    m.forEach { it.set("—") }
+                    texto.text = SIN_DATOS
                 }
-                grafica.datos(xs, ys, futuros = futuros)
-                val pred = futuros.last().second
-                val cambio = pred - ys.last()
-                m[0].set(f(ys.last(), 1)); m[1].set(f(pred, 1), Tema.ACENTO2)
-                m[2].set((if (cambio >= 0) "+" else "") + f(cambio, 1))
-                val tabla = NewtonExtrapolacion.tablaDiferencias(ys.takeLast(4))
-                texto.text = "Tabla de diferencias (últimos 4 valores):\n" +
-                        tabla.mapIndexed { k, fila -> "Δ$k: " + fila.joinToString("   ") { f(it, 2) } }.joinToString("\n")
-            } catch (e: IllegalArgumentException) {
-                grafica.datos(emptyList(), emptyList())
-                m.forEach { it.set("—") }
-                texto.text = SIN_DATOS
             }
         }
         alElegir(variable) { calcular() }
@@ -174,18 +244,23 @@ class Modulo4Activity : PantallaBase() {
     override fun construir() {
         var calcular: () -> Unit = {}
         val ultimo = Repositorio.historial.ultimo()
+        lateinit var grafica: GraficaLinea
+        lateinit var m: List<MetricaView>
+        lateinit var fila: FilaRango
+        lateinit var texto: TextView
 
         val carga = tarjeta("Carga a recuperar") {
             nota("Horas de sueño necesarias para recuperarte de una carga dada.")
-            val c = campo("Carga de entrenamiento (0-98)", ultimo?.carga?.toInt()?.toString() ?: "60")
+            val c = campo("Carga de entrenamiento (0-94)", ultimo?.carga?.toInt()?.toString() ?: "60")
             boton("Calcular") { calcular() }
             c
         }
-        val (grafica, m, texto) = tarjeta("Resultado") {
-            nota("Curva: capacidad de recuperación según horas de sueño. El punto azul es la solución.")
-            val g = grafica()
-            val mm = filaMetricas("Sueño necesario", "Comprobación", "Tu sueño")
-            Triple(g, mm, resultado())
+        tarjeta("Resultado") {
+            nota("Curva: capacidad de recuperación según las horas de sueño. El punto azul es la solución.")
+            grafica = grafica()
+            m = filaMetricas("Sueño necesario", "Comprobación", "Tu sueño")
+            fila = filaRango()
+            texto = resultado()
         }
 
         calcular = {
@@ -195,18 +270,16 @@ class Modulo4Activity : PantallaBase() {
             } else try {
                 val h = OptimizacionSueno.suenoNecesario(c)
                 val exacto = OptimizacionSueno.suenoAnalitico(c)
-                val horas = (0..10).map { it.toDouble() }
+                val horas = (4..10).map { it.toDouble() }
                 grafica.datos(horas, horas.map { OptimizacionSueno.capacidad(it) }, futuros = listOf(h to c))
                 m[0].set("${f(h, 2)} h", Tema.ACENTO2)
                 m[1].set("${f(exacto, 2)} h")
-                if (ultimo != null) {
-                    m[2].set("${f(ultimo.suenoHoras, 1)} h")
-                    val dif = h - ultimo.suenoHoras
-                    texto.text = if (dif > 0) "Te faltan ${f(dif, 1)} h de sueño para recuperarte de esta carga."
-                    else "Tu sueño de la última semana es suficiente para esta carga."
-                } else {
-                    m[2].set("—"); texto.text = ""
-                }
+                m[2].set(if (ultimo != null) "${f(ultimo.suenoHoras, 1)} h" else "—")
+                fila.set("Sueño necesario", h, "${f(h, 1)} h", Referencias.SUENO, 0.0, 12.0,
+                    estadoTexto = "Mínimo para esta carga", color = Tema.ACENTO2,
+                    leyenda = "Recomendado al entrenar: 8–10 h")
+                texto.text = "Con ${f(h, 1)} h te recuperas de esta carga, pero lo recomendable para un atleta es dormir 8–10 h." +
+                        (if (ultimo != null && ultimo.suenoHoras < h) "\n\nTu última semana dormiste ${f(ultimo.suenoHoras, 1)} h: te faltan ${f(h - ultimo.suenoHoras, 1)} h." else "")
             } catch (e: Exception) {
                 texto.text = e.message ?: "No se pudo calcular."
             }
@@ -223,6 +296,10 @@ class Modulo5Activity : PantallaBase() {
     override fun construir() {
         var calcular: () -> Unit = {}
         val ultimo = Repositorio.historial.ultimo()
+        lateinit var grafica: GraficaLinea
+        lateinit var m: List<MetricaView>
+        lateinit var fila: FilaRango
+        lateinit var texto: TextView
 
         val campos = tarjeta("Datos de la sesión") {
             val fcs = campo("FC medida durante la sesión (lpm, separadas por coma)", "120,140,155,160,150", Tipo.TEXTO)
@@ -232,10 +309,11 @@ class Modulo5Activity : PantallaBase() {
             boton("Calcular TRIMP") { calcular() }
             listOf(fcs, dt, fcRep, fcMax) to hombre
         }
-        val (grafica, m, texto) = tarjeta("Resultado") {
-            val g = grafica(200)
-            val mm = filaMetricas("TRIMP", "Duración", "FC media")
-            Triple(g, mm, resultado())
+        tarjeta("Resultado") {
+            grafica = grafica(200)
+            m = filaMetricas("TRIMP", "Duración", "FC media")
+            fila = filaRango()
+            texto = resultado()
         }
 
         calcular = {
@@ -251,6 +329,15 @@ class Modulo5Activity : PantallaBase() {
                 m[0].set(f(trimp, 1), Tema.ACENTO)
                 m[1].set("${f((fcs.size - 1) * dt, 0)} min")
                 m[2].set(f(fcs.average(), 0))
+                val color = when {
+                    trimp < 50 -> Tema.ACENTO2
+                    trimp < 100 -> Tema.ACENTO
+                    trimp < 150 -> Tema.AMBAR
+                    else -> Tema.ROJO
+                }
+                fila.set("Carga de la sesión", trimp, "${f(trimp, 0)} u", Referencias.TRIMP_MODERADA, 0.0, 200.0,
+                    estadoTexto = Referencias.categoriaTrimp(trimp), color = color,
+                    leyenda = "Zona moderada: 50–100 u (referencia orientativa)")
                 texto.text = "Úsalo para comparar sesiones: mientras más alto, más exigente fue."
             } catch (e: IllegalArgumentException) {
                 texto.text = e.message ?: "Datos insuficientes."
@@ -268,6 +355,7 @@ class DifusaActivity : PantallaBase() {
     override fun construir() {
         var calcular: () -> Unit = {}
         val ultimo = Repositorio.historial.ultimo()
+        lateinit var filas: List<FilaRango>
 
         val campos = tarjeta("Entradas") {
             val (carga, sueno) = par(
@@ -283,6 +371,7 @@ class DifusaActivity : PantallaBase() {
             val b = medidor()
             Triple(n, b, resultado())
         }
+        tarjeta("Tus entradas frente a lo ideal") { filas = List(3) { filaRango() } }
 
         calcular = {
             val c = numero(campos[0]); val s = numero(campos[1]); val d = numero(campos[2])
@@ -298,13 +387,16 @@ class DifusaActivity : PantallaBase() {
                     r < 65 -> "Vigila tu recuperación y evita subir la carga esta semana."
                     else -> "Reduce la carga y prioriza dormir."
                 }
+                filas[0].set("Carga", c, corto(c), Referencias.CARGA, 0.0, 100.0)
+                filas[1].set("Sueño", s, "${f(s, 1)} h", Referencias.SUENO, 0.0, 12.0)
+                filas[2].set("FC sobre tu base", d, "${if (d >= 0) "+" else ""}${f(d, 1)} lpm", Referencias.DELTA_FC, -10.0, 15.0)
             }
         }
         calcular()
     }
 }
 
-// ───────────────────────── IA · RED + BFS + HILL CLIMBING ─────────────────────────
+// ───────────────────────── IA: RED + BFS + HILL CLIMBING ─────────────────────────
 class IAActivity : PantallaBase() {
     override val nombre get() = "7 · Agente"
     override val subtitulo get() = "Red neuronal, Best-First y Hill Climbing"
@@ -323,6 +415,7 @@ class IAActivity : PantallaBase() {
             val mm = filaMetricas("Carga", "Sueño")
             mm to resultado()
         }
+
         lateinit var estadoMuestras: TextView
         fun mostrarPesos() {
             val p = Repositorio.pesos

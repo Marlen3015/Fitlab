@@ -67,6 +67,7 @@ class MainActivity : PantallaBase() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = redondo(Tema.TARJETA, 16, Tema.BORDE)
+            elevation = dp(2).toFloat()
             setPadding(dp(14), dp(14), dp(14), dp(14))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }
             isClickable = true
@@ -74,7 +75,7 @@ class MainActivity : PantallaBase() {
         }
         fila.addView(TextView(this).apply {
             text = num; textSize = 16f; gravity = Gravity.CENTER
-            setTypeface(typeface, Typeface.BOLD); setTextColor(Tema.FONDO)
+            setTypeface(typeface, Typeface.BOLD); setTextColor(Tema.SOBRE_ACENTO)
             background = circulo(Tema.ACENTO)
             layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { rightMargin = dp(14) }
         })

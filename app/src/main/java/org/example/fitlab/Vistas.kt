@@ -21,6 +21,7 @@ class GraficaLinea(context: Context) : View(context) {
     private var ys: List<Double> = emptyList()
     private var recta: Pair<Double, Double>? = null
     private var futuros: List<Pair<Double, Double>> = emptyList()
+    private var banda: Pair<Double, Double>? = null
     private var colorSerie = Tema.ACENTO
 
     private val d = resources.displayMetrics.density
@@ -37,6 +38,8 @@ class GraficaLinea(context: Context) : View(context) {
         style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = Tema.ACENTO2
         pathEffect = DashPathEffect(floatArrayOf(8f * d, 6f * d), 0f)
     }
+    private val pBanda = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tema.ACENTO; alpha = 38 }
+    private val pTextoBanda = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tema.ACENTO; textSize = 10f * d }
     private val pRejilla = Paint().apply { color = Tema.BORDE; strokeWidth = 1f * d }
     private val pTexto = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tema.TEXTO2; textSize = 11f * d }
     private val pTextoAzul = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -47,9 +50,10 @@ class GraficaLinea(context: Context) : View(context) {
         x: List<Double>, y: List<Double>,
         recta: Pair<Double, Double>? = null,
         futuros: List<Pair<Double, Double>> = emptyList(),
-        color: Int = Tema.ACENTO
+        color: Int = Tema.ACENTO,
+        banda: Pair<Double, Double>? = null
     ) {
-        xs = x; ys = y; this.recta = recta; this.futuros = futuros; colorSerie = color
+        xs = x; ys = y; this.recta = recta; this.futuros = futuros; colorSerie = color; this.banda = banda
         invalidate()
     }
 
@@ -64,7 +68,7 @@ class GraficaLinea(context: Context) : View(context) {
         val todosX = xs + futuros.map { it.first }
         val extraY = recta?.let { r -> listOf(r.first * xs.first() + r.second, r.first * (todosX.maxOrNull() ?: 0.0) + r.second) }
             ?: emptyList()
-        val todosY = ys + futuros.map { it.second } + extraY
+        val todosY = ys + futuros.map { it.second } + extraY + (banda?.toList() ?: emptyList())
 
         val minX = todosX.minOrNull() ?: 0.0
         val maxX = (todosX.maxOrNull() ?: 1.0).let { if (it == minX) minX + 1 else it }
@@ -77,6 +81,12 @@ class GraficaLinea(context: Context) : View(context) {
         fun px(x: Double) = (izq + (x - minX) / (maxX - minX) * (w - izq - der)).toFloat()
         fun py(y: Double) = (arr + (1 - (y - y0) / (y1 - y0)) * (h - arr - aba)).toFloat()
 
+        // zona ideal (franja verde clara)
+        banda?.let { (bMin, bMax) ->
+            c.drawRect(izq, py(bMax), w - der, py(bMin), pBanda)
+            pTextoBanda.textAlign = Paint.Align.LEFT
+            c.drawText("Zona ideal", izq + 6f * d, py(bMax) + 13f * d, pTextoBanda)
+        }
         // rejilla horizontal con valores
         pTexto.textAlign = Paint.Align.RIGHT
         for (i in 0..3) {
@@ -138,15 +148,17 @@ class Medidor(context: Context) : View(context) {
         val top = 14f * d; val alto = 12f * d
         pBarra.shader = LinearGradient(
             x0, 0f, x1, 0f,
-            intArrayOf(Tema.ACENTO, Tema.AMBAR, Tema.ROJO),
+            intArrayOf(Tema.GRAD_BAJO, Tema.GRAD_MEDIO, Tema.GRAD_ALTO),
             floatArrayOf(0.2f, 0.55f, 0.9f), Shader.TileMode.CLAMP
         )
         c.drawRoundRect(RectF(x0, top, x1, top + alto), alto / 2, alto / 2, pBarra)
         val cx = x0 + (x1 - x0) * (valor / 100.0).toFloat()
-        pMarca.color = Tema.TEXTO
-        c.drawCircle(cx, top + alto / 2, 11f * d, pMarca)
+        pMarca.color = Tema.BORDE
+        c.drawCircle(cx, top + alto / 2, 12f * d, pMarca)
+        pMarca.color = Tema.TARJETA
+        c.drawCircle(cx, top + alto / 2, 10.5f * d, pMarca)
         pMarca.color = Tema.colorRiesgo(valor)
-        c.drawCircle(cx, top + alto / 2, 6.5f * d, pMarca)
+        c.drawCircle(cx, top + alto / 2, 6f * d, pMarca)
         val yTxt = top + alto + 24f * d
         pTexto.textAlign = Paint.Align.LEFT;   c.drawText("Bajo", x0, yTxt, pTexto)
         pTexto.textAlign = Paint.Align.CENTER; c.drawText("Medio", (x0 + x1) / 2, yTxt, pTexto)
@@ -170,5 +182,40 @@ class BarraView(context: Context) : View(context) {
             pRelleno.color = color
             c.drawRoundRect(RectF(0f, 0f, maxOf(h, w * fraccion.toFloat()), h), h / 2, h / 2, pRelleno)
         }
+    }
+}
+
+/** Franja con la zona ideal en verde claro y una marca con el valor actual. */
+class RangoView(context: Context) : View(context) {
+    private var valor = 0.0
+    private var escMin = 0.0
+    private var escMax = 1.0
+    private var idealMin = 0.0
+    private var idealMax = 0.0
+    private var colorMarca = Tema.ACENTO
+    private val d = resources.displayMetrics.density
+    private val pPista = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tema.BORDE }
+    private val pIdeal = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Tema.ACENTO; alpha = 110 }
+    private val pMarca = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var hayDatos = false
+
+    fun set(v: Double, eMin: Double, eMax: Double, iMin: Double, iMax: Double, color: Int) {
+        valor = v; escMin = eMin; escMax = eMax; idealMin = iMin; idealMax = iMax
+        colorMarca = color; hayDatos = true; invalidate()
+    }
+
+    fun limpiar() { hayDatos = false; invalidate() }
+
+    override fun onDraw(c: Canvas) {
+        val x0 = 10f * d; val x1 = width - 10f * d
+        val cy = height / 2f; val m = 4f * d
+        fun px(x: Double) = x0 + (((x - escMin) / (escMax - escMin)).coerceIn(0.0, 1.0)).toFloat() * (x1 - x0)
+        c.drawRoundRect(RectF(x0, cy - m, x1, cy + m), m, m, pPista)
+        if (!hayDatos) return
+        c.drawRoundRect(RectF(px(idealMin), cy - m, px(idealMax), cy + m), m, m, pIdeal)
+        val cx = px(valor)
+        pMarca.color = Tema.BORDE;      c.drawCircle(cx, cy, 10f * d, pMarca)
+        pMarca.color = Tema.TARJETA;    c.drawCircle(cx, cy, 8.5f * d, pMarca)
+        pMarca.color = colorMarca;      c.drawCircle(cx, cy, 5f * d, pMarca)
     }
 }

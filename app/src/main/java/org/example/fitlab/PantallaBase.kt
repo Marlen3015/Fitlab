@@ -21,12 +21,13 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
-import androidx.activity.EdgeToEdge
 import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import java.util.Locale
+import org.example.fitlab.logica.Rango
 
 enum class Tipo { DECIMAL, ENTERO, TEXTO }
 
@@ -48,6 +49,32 @@ class MetricaView(context: Context, etiqueta: String) : LinearLayout(context) {
     fun set(v: String, color: Int = Tema.TEXTO) { valor.text = v; valor.setTextColor(color) }
 }
 
+/** Un renglón "valor actual vs rango ideal": nombre, estado, franja con marca y leyenda. */
+class FilaRango(
+    private val nombre: TextView, private val estado: TextView,
+    private val barra: RangoView, private val ideal: TextView
+) {
+    private fun corto(x: Double) =
+        if (x == Math.rint(x)) String.format(Locale.US, "%.0f", x) else String.format(Locale.US, "%.1f", x)
+
+    fun set(
+        titulo: String, valor: Double, texto: String, r: Rango, escMin: Double, escMax: Double,
+        estadoTexto: String? = null, color: Int? = null, leyenda: String? = null
+    ) {
+        nombre.text = "$titulo · $texto"
+        val dentro = r.contiene(valor)
+        val col = color ?: if (dentro) Tema.ACENTO else Tema.AMBAR
+        estado.text = estadoTexto ?: if (dentro) "En rango" else if (valor < r.min) "Por debajo" else "Por encima"
+        estado.setTextColor(col)
+        barra.set(valor, escMin, escMax, r.min, r.max, col)
+        ideal.text = leyenda ?: ("Ideal: ${corto(r.min)}–${corto(r.max)} ${r.unidad}").trim()
+    }
+
+    fun vaciar(titulo: String) {
+        nombre.text = "$titulo · —"; estado.text = ""; ideal.text = ""; barra.limpiar()
+    }
+}
+
 /**
  * Base de todas las pantallas: fondo oscuro, encabezado con botón de regreso y ayudas
  * para armar tarjetas, campos, botones, métricas y gráficas sin escribir XML.
@@ -62,7 +89,11 @@ abstract class PantallaBase : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        EdgeToEdge.enable(this, SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
+        // Corrección del error 'Unresolved reference: EdgeToEdge'
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
+        )
         val scroll = ScrollView(this).apply { setBackgroundColor(Tema.FONDO) }
         contenido = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -131,6 +162,7 @@ abstract class PantallaBase : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = redondo(Tema.TARJETA, 16, Tema.BORDE)
+            elevation = dp(2).toFloat()
             setPadding(dp(16), dp(14), dp(16), dp(16))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) }
         }
@@ -255,8 +287,8 @@ abstract class PantallaBase : AppCompatActivity() {
     protected fun boton(texto: String, primario: Boolean = true, accion: () -> Unit): Button = Button(this).apply {
         text = texto; textSize = 15f
         setAllCaps(false)
-        setTextColor(if (primario) Tema.FONDO else Tema.TEXTO)
-        background = redondo(if (primario) Tema.ACENTO else Tema.BORDE, 12)
+        setTextColor(if (primario) Tema.SOBRE_ACENTO else Tema.ACENTO)
+        background = redondo(if (primario) Tema.ACENTO else Tema.ACENTO_SUAVE, 12)
         stateListAnimator = null
         layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(48)).apply { topMargin = dp(12) }
         setOnClickListener { accion() }
@@ -286,6 +318,26 @@ abstract class PantallaBase : AppCompatActivity() {
     protected fun medidor(): Medidor = Medidor(this).also {
         it.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(64)).apply { topMargin = dp(8) }
         destino.addView(it)
+    }
+
+    protected fun filaRango(): FilaRango {
+        val cab = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, dp(2))
+            destino.addView(this)
+        }
+        val n = TextView(this).apply {
+            textSize = 14f; setTextColor(Tema.TEXTO)
+            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+            cab.addView(this)
+        }
+        val e = TextView(this).apply { textSize = 12f; setTypeface(typeface, Typeface.BOLD); cab.addView(this) }
+        val barra = RangoView(this).also {
+            it.layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, dp(28))
+            destino.addView(it)
+        }
+        val i = TextView(this).apply { textSize = 12f; setTextColor(Tema.TEXTO2); destino.addView(this) }
+        return FilaRango(n, e, barra, i)
     }
 
     /** Etiqueta + barra de progreso (para probabilidades). */

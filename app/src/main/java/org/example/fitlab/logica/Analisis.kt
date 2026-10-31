@@ -66,14 +66,17 @@ object NewtonExtrapolacion {
 
 /**
  * MÓDULO 4 - Newton-Raphson: ¿cuántas horas de sueño necesito para recuperar una carga dada?
- * Modelo simple (supuesto del proyecto): capacidad de recuperación = 100·(1 − e^(−K·horas)).
- * Rendimientos decrecientes: las primeras horas recuperan más que las últimas.
+ * Modelo simple (supuesto del proyecto): sin dormir al menos S0 = 4 h no hay recuperación y, a partir
+ * de ahí, capacidad = 100·(1 − e^(−K·(horas − S0))): rendimientos decrecientes.
  * Buscamos la raíz de f(s) = capacidad(s) − carga.
  */
 object OptimizacionSueno {
-    private const val K = 0.35
-    fun capacidad(s: Double) = 100.0 * (1 - exp(-K * s))
-    private fun derivada(s: Double) = 100.0 * K * exp(-K * s)
+    private const val K = 0.5
+    const val S0 = 4.0
+    const val CARGA_MAX = 94.0       // con 10 h la capacidad llega a ~95
+
+    fun capacidad(s: Double) = 100.0 * (1 - exp(-K * (s - S0)))
+    private fun derivada(s: Double) = 100.0 * K * exp(-K * (s - S0))
 
     fun newtonRaphson(f: (Double) -> Double, df: (Double) -> Double,
                       x0: Double, tol: Double = 1e-6, maxIter: Int = 50): Double {
@@ -89,12 +92,12 @@ object OptimizacionSueno {
     }
 
     fun suenoNecesario(carga: Double): Double {
-        require(carga >= 0 && carga < 99) { "Carga fuera de rango para este modelo" }
+        require(carga >= 0 && carga <= CARGA_MAX) { "La carga debe estar entre 0 y ${CARGA_MAX.toInt()}" }
         return newtonRaphson({ capacidad(it) - carga }, { derivada(it) }, x0 = 7.0)
     }
 
-    /** Comprobación analítica: s = −ln(1 − carga/100)/K. Útil para validar ante la maestra. */
-    fun suenoAnalitico(carga: Double) = -ln(1 - carga / 100) / K
+    /** Comprobación analítica: s = S0 − ln(1 − carga/100)/K. Útil para validar ante la maestra. */
+    fun suenoAnalitico(carga: Double) = S0 - ln(1 - carga / 100) / K
 }
 
 /**
